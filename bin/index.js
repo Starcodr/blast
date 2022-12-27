@@ -61,13 +61,14 @@ if (options.action == "save") {
 	var rl = readline.createInterface(process.stdin, process.stdout);
 	rl.question("Run this command? [yes]/no: ", function (answer) {
 		if (answer == "no") {
+			fs.writeFileSync("/home/lars/.config/blast/command.sh", "");
+
 			console.log("Aborted");
 			process.exit(1);
 		}
 		else {
-			console.log("Running command...\n");
-
 			fs.writeFileSync("/home/lars/.config/blast/command.sh", bookmarks[options.name]);
+			console.log("Running command...\n");
 
 			rl.close();
 			return;

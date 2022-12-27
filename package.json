@@ -1,5 +1,5 @@
 {
-  "name": "blast",
+  "name": "blastit",
   "version": "1.0.0",
   "description": "Bookmark your latest executed terminal command.",
   "main": "bin/index.js",

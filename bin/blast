@@ -3,12 +3,12 @@ history | tail -n 2 | head -n 1 | cut -c 8- > $HOME/.config/blast/latest_history
 case $# in
 
   0)
-    blast -a "showall" -n "" -h ""
+    blastit -a "showall" -n "" -h ""
 	$HOME/.config/blast/command.sh
     ;;
 
   1)
-	blast -a "use" -n $1 -h ""
+	blastit -a "use" -n $1 -h ""
 	$HOME/.config/blast/command.sh
 	
 	# x = $('blast -a "use" -n $1 -h ""')
@@ -18,13 +18,13 @@ case $# in
 
   2)
 	if [ $1 == "as" ]; then
-		blast -a "save" -n $2 -h "$(cat $HOME/.config/blast/latest_history.txt)"
+		blastit -a "save" -n $2 -h "$(cat $HOME/.config/blast/latest_history.txt)"
 	else
-		blast -a "error" -n "illegal syntax" -h ""
+		blastit -a "error" -n "illegal syntax" -h ""
 	fi
     ;;
 
   *)
-    blast -a "error" -n "wrong number of arguments" -h ""
+    blastit -a "error" -n "wrong number of arguments" -h ""
     ;;
 esac

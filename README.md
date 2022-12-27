@@ -2,19 +2,20 @@
 Linux cli command for bookmarking latest command in history.
 
 ## Installation
-mkdir ~/.config/blast
-touch ~/.config/blast/bookmarks.json
-touch ~/.config/blast/latest_history.txt
-touch ~/.config/blast/command.sh
-chmod ~/.config/blast/command.sh +x
+```
+$ mkdir ~/.config/blast
+$ touch ~/.config/blast/bookmarks.json
+$ touch ~/.config/blast/latest_history.txt
+$ touch ~/.config/blast/command.sh
+$ chmod ~/.config/blast/command.sh +x
 
-add /home/"user"/bin to $PATH
-cp bin/blast ~/bin
-chmod ~/bin/blast +x
+$ add /home/"user"/bin to $PATH
+$ cp bin/blast ~/bin
+$ chmod ~/bin/blast +x
 
-npm install
-npm i -g .
-
+$ npm install
+$ npm install -g .
+```
 
 ## Usage
 ```
@@ -30,6 +31,8 @@ $ blast migrate
 .
 $ █
 ```
-
+Run "blast" command without parameters to open GUI.  
+The GUI list all bookmarked commands. Writing the name of the command and pressing enter executed the command.
+#
 ## TODO
 Simplify install process.
