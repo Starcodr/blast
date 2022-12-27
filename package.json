@@ -1,0 +1,20 @@
+{
+  "name": "blast",
+  "version": "1.0.0",
+  "description": "Bookmark your latest executed terminal command.",
+  "main": "bin/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Lars Boris",
+  "license": "ISC",
+  "bin": {
+    "blastit": "./bin/index.js"
+  },
+  "dependencies": {
+    "boxen": "4.0",
+    "chalk": "2.4",
+    "clear": "^0.1.0",
+    "yargs": "13.2"
+  }
+}
