@@ -5,23 +5,25 @@ const boxen = require("boxen");
 const yargs = require("yargs");
 const { exec } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const readline = require('readline');
 const { check, updateLocale } = require("yargs");
 const { exit } = require("process");
-var clear = require('clear');
-
-const enterAltScreenCommand = '\x1b[?1049h';
-const leaveAltScreenCommand = '\x1b[?1049l';
-// process.on('exit', () => {
-//     process.stdout.write(leaveAltScreenCommand);
-// });
-
-const bookmarksFile = '/home/lars/.config/blast/bookmarks.json';
+const clear = require('clear');
 
 var bookmarks = new Array();
 var current = "";
 var result = {};
 
+/* ASCII codes for entering or leaving full screen mode */
+const enterAltScreenCommand = '\x1b[?1049h';
+const leaveAltScreenCommand = '\x1b[?1049l';
+
+/* Path to file containing bookmarks */
+const bookmarksFile = os.homedir() + "/.config/blast/bookmarks.json";
+const commandFile = os.homedir() + "/.config/blast/command.sh";
+
+/* Possible cli input parameters */
 const options = yargs
  .usage("Usage: -keyword <name>")
  .option("n", { alias: "name", describe: "name of bookmark", type: "string", demandOption: false })
@@ -29,70 +31,143 @@ const options = yargs
  .option("a", { alias: "action", describe: "status: error or success", type: "string", demandOption: false })
  .argv;
 
+/* Make sure no command is run unintentionally */
+fs.writeFileSync(commandFile, "");
+
+/* Fetch existing bookmarks */
+let rawdata = fs.readFileSync(bookmarksFile);
+bookmarks = JSON.parse(rawdata);
+
+/* Exit with error if bookmarks file not found */
+if (!fs.existsSync(bookmarksFile)) {
+	console.log("Error: bookmarks file does not exists");
+	return;
+}
+
 if (options.action == "save") {
+	/* 
+	* Bookmark command specified at cli
+	*/
+
+	/* Avoid recursion */
 	if (options.history.startsWith("blast")) {
-		console.log(chalk.red("Blasting blast is not sane...aborting!"));
+		console.log("\n    " + chalk.red("Blasting blast is not sane...aborting!") + "\n");
 		return;
 	}
 
-	console.log("Bookmarking last command: \n" + options.history);
-	console.log("as" + chalk.yellow.bold(options.name));
+	let saveBookmark = function() {
+		console.log("Bookmarking last command as " + chalk.yellow.bold(options.name) + ":");
+		console.log(chalk.bold.green(options.history));
 
-	let rawdata = fs.readFileSync(bookmarksFile);
-	let bookmarks = JSON.parse(rawdata);
+		/* Store bookmark */
+		bookmarks[options.name] = options.history;
 
-	bookmarks[options.name] = options.history;
-
-	let data = JSON.stringify(bookmarks, null, 4);
-
-	if (!fs.existsSync(bookmarksFile)) {
-		console.log("not exists");
-	} else {
+		let data = JSON.stringify(bookmarks, null, 4);
 		fs.writeFileSync(bookmarksFile, data);
 	}
 
+	if (options.name in bookmarks) {
+		/* Have user confirm overwrite */
+		let rl = readline.createInterface(process.stdin, process.stdout);
+		rl.question("A bookmark with this name already exists. Replace? [yes]/no: ", function (answer) {
+			if (answer == "no" || answer == "n") {
+				console.log("Aborted");
+				process.exit(1);
+			} else {
+				saveBookmark();
+				exit();
+			}
+		});
+	} else {
+		saveBookmark();
+	}
+} else if (options.action == "delete") {
+	/*
+	* Delete bookmark specified at cli
+	*/
+
+	if (options.name in bookmarks) {
+		delete bookmarks[options.name];
+
+		let data = JSON.stringify(bookmarks, null, 4);
+		fs.writeFileSync(bookmarksFile, data);
+
+		console.log("Deleting bookmark: " + chalk.yellow.bold(options.name));
+	} else {
+		console.log(chalk.red("Bookmark does not exist: ") + chalk.yellow.bold(options.name));
+	}
+} else if (options.action == "show") {
+	/*
+	* Show bookmarks matching string specified at cli
+	*/
+	
+	let found = 0;
+
+	for (let key of Object.keys(bookmarks)) {
+		if ( key.toLowerCase().startsWith(options.name.toLowerCase()) ) {
+			found++;
+
+			console.log("\n    Bookmark " + chalk.yellow.bold(key + ":"));
+			console.log("    " + chalk.bold.green(bookmarks[key]) + "\n");
+		}
+	}
+
+	if (found == 0) {
+		console.log("\n    " + chalk.red("No bookmarks found matching: ") + chalk.yellow.bold(options.name) + "\n");
+	}
 } else if (options.action == "use") {
-	let rawdata = fs.readFileSync(bookmarksFile);
-	let bookmarks = JSON.parse(rawdata);
+	/*
+	* Run command specified at cli
+	*/
 
-	const command = chalk.yellow.bold(bookmarks[options.name]);
-	console.log("\n" + command);
+	if (options.name in bookmarks) {
+		const command = chalk.green.bold(bookmarks[options.name]);
+		console.log("\n" + command);
 
-	var rl = readline.createInterface(process.stdin, process.stdout);
-	rl.question("Run this command? [yes]/no: ", function (answer) {
-		if (answer == "no") {
-			fs.writeFileSync("/home/lars/.config/blast/command.sh", "");
+		/* Have user confirm */
+		let rl = readline.createInterface(process.stdin, process.stdout);
+		rl.question("Run this command? [yes]/no: ", function (answer) {
+			if (answer == "no" || answer == "n") {
+				console.log("Aborted");
+				process.exit(1);
+			} else {
+				console.log("Running command...\n");
 
-			console.log("Aborted");
-			process.exit(1);
-		}
-		else {
-			fs.writeFileSync("/home/lars/.config/blast/command.sh", bookmarks[options.name]);
-			console.log("Running command...\n");
+				fs.writeFileSync(commandFile, bookmarks[options.name]);
+				rl.close();
+				return;
+			}
+		});
+	} else {
+		console.log("\n    " + chalk.red("No bookmark found matching: ") + chalk.yellow.bold(options.name) + "\n");
+	}
+}
+else if (options.action = "showall") {
+	/*
+	 * Show GUI
+	 */
 
-			rl.close();
-			return;
-		}
-	});//question()
-} else if (options.action = "showall") {
+	/* Enter fullscreen */
 	process.stdout.write(enterAltScreenCommand);
-	// process.stdout.write('\x1Bc');
 
 	if (!fs.existsSync(bookmarksFile)) {
-		fs.writeFileSync("/home/lars/.config/blast/command.sh", "");
-		console.log("not exists");
+		fs.writeFileSync(commandFile, "");
+		console.log("Bookmarks file does not exist"); // TODO: create file if not found
 	} else {
-		let rawdata = fs.readFileSync(bookmarksFile);
-		bookmarks = JSON.parse(rawdata);
-
-		autoComplete();
+		/* Start GUI */
+		handleKeyboardEvents();
 	}
 } else {
-	console.log("Error: " + options.status);
+	console.log("Error: " + options.status); // TODO: better error handling
 }
 
-function autoComplete() {
-	update();
+
+/**
+ * Handle user GUI interaction
+ */
+function handleKeyboardEvents() {
+	/* Draw GUI initially */
+	redrawGUI();
 
 	process.stdin.currentLine = '';
 	process.stdin.setRawMode(true);
@@ -107,73 +182,72 @@ function autoComplete() {
 				clear();
 				break;
 
+			/* Ctrl-c */
 			case 0x03:
-				fs.writeFileSync("/home/lars/.config/blast/command.sh", "");
-				process.stdout.write(leaveAltScreenCommand);
 				console.log('Exiting..');
+
+				process.stdout.write(leaveAltScreenCommand);
 				process.kill(process.pid, 'SIGINT');
 				break;
 
+			/* Esc */
 			case 27:
-				fs.writeFileSync("/home/lars/.config/blast/command.sh", "");
-				process.stdout.write(leaveAltScreenCommand);
 				console.log('Exiting..');
+
+				process.stdout.write(leaveAltScreenCommand);
 				process.kill(process.pid, 'SIGINT');
 				break;
-	
+			
+			/* Backspace */
 			case 127:
 				current = current.slice(0, -1);
-				update();
+				redrawGUI();
+
 				break;
 
+			/* Tab */
 			case 0x09:
-				update();
+				redrawGUI();
 				break;
 
+			/* Enter */
 			case 13:
-				process.stdout.write(leaveAltScreenCommand);
-
 				let keys = Object.keys(result);
 				if (keys.length == 1) {
 					console.log("\nRunning command " + chalk.yellow.bold(keys[0]) + ": " + chalk.green(bookmarks[keys[0]]) + "\n");
 
-					fs.writeFileSync("/home/lars/.config/blast/command.sh", bookmarks[keys[0]]);
-
+					process.stdout.write(leaveAltScreenCommand);
+					fs.writeFileSync(commandFile, bookmarks[keys[0]]);
 					exit();
 				}
 
 				break;
 
+			/* User input */
 			default:
 				current += String.fromCharCode(charAsAscii);
-				update();
+				redrawGUI();
+
 				break;
 		}
 	});
-
-	// process.stdin.on('line', line => console.log(`New line: ${line}`));
 }
 
-function update() {
+
+/**
+ * Redraw GUI after user interaction
+ */
+function redrawGUI() {
 	result = {};
 
-	const match = chalk.yellow.bold;
+	const match = chalk.green.bold;
 	const noMatch = chalk.white;
 	const tableBorder = chalk.white;
+	const usage = chalk.white;
 
 	readline.cursorTo(process.stdout, 0, 0);
-	readline.clearScreenDown(process.stdout);
-	// clear();
-
-	// ╭───────┬────────────────────╮
-	// │ splif │ cat some dims more │
-	// ├───────┼────────────────────┤
-	// │       │                    │
-	// ├───────┼────────────────────┤
-	// │       │                    │
-	// ├───────┼────────────────────┤
-	// │       │                    │
-	// ╰───────┴────────────────────╯
+	readline.clearScreenDown(process.stdout); // process.stdout.write("\x1Bc")
+	readline.cursorTo(process.stdout, 0, 60);
 
 	let maxKeyLength = 0;
 	for (let key of Object.keys(bookmarks)) {
@@ -182,28 +256,33 @@ function update() {
 
 	maxKeyLength = Math.max(maxKeyLength, 25);
 
-	console.log( match("Press ctrl-c to exit\n") );
+	console.log( chalk.yellow.bold("Usage\n") );
+	console.log( usage("blast as ") + chalk.blue("'bookmark-name'") + "     <- Save bookmark");
+	console.log( usage("blast ") + chalk.blue("'bookmark-name'") + "        <- Run bookmarked command");
+	console.log( usage("blast delete ") + chalk.blue("'bookmark-name'") + " <- Delete bookmark" );
+	console.log( usage("blast show ") + chalk.blue("'bookmark-name'") + "   <- List bookmarks starting with specified string");
+
+	process.stdout.write( "\n" + chalk.bgWhite.black(" ^C / Esc ") + " Exit" + "\n" );
 
 	process.stdout.write( tableBorder("╭") );
 	process.stdout.write( tableBorder("─".repeat(maxKeyLength + 2)) );
 	process.stdout.write( tableBorder("┬") );
-	process.stdout.write( tableBorder("─".repeat(100)) );
+	process.stdout.write( tableBorder("─".repeat(80)) );
 	process.stdout.write( tableBorder("╮\n") );
 
 	for (let key of Object.keys(bookmarks)) {
-		let commandAlias = "";
-		let command = "";
+		let commandAlias = key.padEnd(maxKeyLength, " ");
+		let command = bookmarks[key].padEnd(78, " ");
 
 		if ( current != "" && key.toLowerCase().startsWith(current.toLowerCase()) ) {
 			result[key] = bookmarks[key];
-			commandAlias = match(key.padEnd(maxKeyLength, " "));
-			command = match(bookmarks[key].padEnd(98, " "));
+			commandAlias = match(commandAlias);
+			command = match(command);
 		} else {
-			commandAlias = noMatch(key.padEnd(maxKeyLength, " "));
-			command = noMatch(bookmarks[key].padEnd(98, " "));
+			commandAlias = noMatch(commandAlias);
+			command = noMatch(command);
 		}
 
-		// let command = chalk.yellow.bold(key + " = " + bookmarks[key]);
 		process.stdout.write( tableBorder("│ ") );
 		process.stdout.write(commandAlias);
 		process.stdout.write( tableBorder(" │ ") );
@@ -213,70 +292,26 @@ function update() {
 		process.stdout.write( tableBorder("│") );
 		process.stdout.write( tableBorder("╌".repeat(maxKeyLength + 2)) );
 		process.stdout.write( tableBorder("┼") );
-		process.stdout.write( tableBorder("╌".repeat(100)) );
+		process.stdout.write( tableBorder("╌".repeat(80)) );
 		process.stdout.write( tableBorder("│\n") );
 	
 	}
 
-		// ╰───────┴────────────────────╯
-
 	process.stdout.write( tableBorder("╰") );
 	process.stdout.write( tableBorder("─".repeat(maxKeyLength + 2)) );
 	process.stdout.write( tableBorder("┴") );
-	process.stdout.write( tableBorder("─".repeat(100)) );
+	process.stdout.write( tableBorder("─".repeat(80)) );
 	process.stdout.write( tableBorder("╯\n") );
 
+	/* Update input line */
 	if (Object.keys(result).length == 1) {
 		process.stdout.write(chalk.white(": "));
 		process.stdout.write(chalk.yellow.bold(current));
 	} else {
 		process.stdout.write(chalk.reset(": " + current));
 	}
-
 }
 
 function checkIfStringStartsWith(str, substrs) {
 	return substrs.some(substr => str.toLowerCase().startsWith(substr.toLowerCase()));
 }
-
-// console.log("name: " + options.name);
-// console.log("history: " + options.history);
-
-// console.dir(process.argv[2]);
-
-// process.argv.forEach(function (val, index, array) {
-// 	console.log(index + ': ' + val);
-//   });
-   
-// const execSync = require('child_process').execSync;
-// code = execSync('history | tail -n 2 | cut -c 8-');
-
-// console.log(code.toString());
-
-// console.log(sh.ls('-l'));
-
-// exec("history | tail -n 2 | cut -c 8-", (error, stdout, stderr) => {
-//     if (error) {
-//         console.log(`error: ${error.message}`);
-//         return;
-//     }
-//     if (stderr) {
-//         console.log(`stderr: ${stderr}`);
-//         return;
-//     }
-//     console.log(`stdout: ${stdout}`);
-// });
-
-// const greeting = chalk.white.bold("Hello!");
-
-
-// const boxenOptions = {
-//  padding: 1,
-//  margin: 1,
-//  borderStyle: "round",
-//  borderColor: "green",
-//  backgroundColor: "#555555"
-// };
-// const msgBox = boxen( greeting, boxenOptions );
-
-// console.log(msgBox);

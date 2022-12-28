@@ -10,21 +10,22 @@ case $# in
   1)
 	blastit -a "use" -n $1 -h ""
 	$HOME/.config/blast/command.sh
-	
-	# x = $('blast -a "use" -n $1 -h ""')
-	# com=$(blast -a "use" -n $1 -h "")
-	# echo "$com"
     ;;
 
   2)
 	if [ $1 == "as" ]; then
 		blastit -a "save" -n $2 -h "$(cat $HOME/.config/blast/latest_history.txt)"
+	elif [ $1 == "show" ]; then
+		blastit -a "show" -n $2 -h "$(cat $HOME/.config/blast/latest_history.txt)"
+	elif [ $1 == "delete" ]; then
+		blastit -a "delete" -n $2 -h "$(cat $HOME/.config/blast/latest_history.txt)"
 	else
 		blastit -a "error" -n "illegal syntax" -h ""
 	fi
     ;;
 
   *)
-    blastit -a "error" -n "wrong number of arguments" -h ""
-    ;;
+
+   blastit -a "error" -n "wrong number of arguments" -h ""
+   ;;
 esac
