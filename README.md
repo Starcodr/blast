@@ -57,6 +57,5 @@ The GUI list all bookmarked commands. Writing the name of the command and pressi
 #
 ## TODO
 - Simplify install process
-- Tab autocompletion in GUI
-- Tab autocompletion on command line
+- Delete function
 - Comment for bookmark
