@@ -31,6 +31,7 @@ const enterAltScreenCommand = '\x1b[?1049h';
 const leaveAltScreenCommand = '\x1b[?1049l';
 
 /* Path to file containing bookmarks etc. */
+const configDirectory = os.homedir() + "/.config/blast";
 const bookmarksFile = os.homedir() + "/.config/blast/bookmarks.json";
 const commandFile = os.homedir() + "/.config/blast/command.sh";
 
@@ -42,12 +43,28 @@ const options = yargs
  .option("a", { alias: "action", describe: "status: error or success", type: "string", demandOption: false })
  .argv;
 
+/* Create required files if they do not exists already */
+if (!fs.existsSync(bookmarksFile)) {
+	fs.writeFile(bookmarksFile, '{}', function (err) {});
+}
+
+if (!fs.existsSync(commandFile)) {
+	fs.writeFile(commandFile, '{}', function (err) {});
+}
+
 /* Make sure no command is run unintentionally */
 fs.writeFileSync(commandFile, "");
 
 /* Fetch existing bookmarks */
 let rawdata = fs.readFileSync(bookmarksFile);
-bookmarks = JSON.parse(rawdata);
+if (rawdata.toString().trim() == "") rawdata = "{}";
+
+try {
+	bookmarks = JSON.parse(rawdata);
+} catch(error) {
+	bookmarks = "{}";
+	console.log("error: " + error);
+}
 
 /* Exit with error if bookmarks file not found */
 if (!fs.existsSync(bookmarksFile)) {
@@ -120,7 +137,7 @@ if (options.action == "save") {
 	let found = 0;
 
 	for (let key of Object.keys(bookmarks)) {
-		if ( key.toLowerCase().includes(options.name.toLowerCase()) ) {
+		if ( key.toLowerCase().includes(options.name.toLowerCase()) || options.name == "$" ) {
 			found++;
 
 			if (found == 1) {
@@ -348,7 +365,7 @@ function findMatches() {
 function redrawGUI() {
 	exactMatch = "";
 
-	const match = chalk.white.italic;
+	const match = chalk.white;
 	const matchUnique = chalk.green;
 	const noMatch = chalk.white;
 	const tableBorder = chalk.white;
@@ -375,6 +392,7 @@ function redrawGUI() {
 	let menu = chalk.bgWhite.black(" ^D ") + " Delete " + chalk.bgWhite.black(" ^C/Esc ") + " Exit";
 	let tableWidth = nameColumnWidth + commandWidth + LIST_NUMBER_COLUMN_WIDTH + 4;
 
+	process.stdout.write( tableBorder("─".repeat(LABEL_TITLE_WIDTH)) + "\n");
 	process.stdout.write( chalk.yellow.bold(LABEL_TITLE) );
 	if (menuWidth + LABEL_TITLE_WIDTH + 4 > terminalWidth()) process.stdout.write( "\n" );
 	readline.cursorTo(process.stdout, tableWidth - menuWidth);
@@ -391,6 +409,13 @@ function redrawGUI() {
 	/* Draw top border of table */
 	process.stdout.write( tableBorder("╭────┬" + "─".repeat(nameColumnWidth + 2)) );
 	process.stdout.write( tableBorder("┬" + "─".repeat(commandWidth + 2) + "╮\n") );
+
+	/* Find last matching name for avoiding to include divider after last list entry */
+	let lastMatch = "";
+	Object.keys(matches).forEach(function(value, index, array) {
+		if (matches[value] == 1 || matches[value] == 2) lastMatch = value;
+	});
+	let lastName = Object.keys(matches).pop();
 
 	/* Draw line for each bookmark in table */
 	for (let key of Object.keys(matches)) {
@@ -418,16 +443,18 @@ function redrawGUI() {
 		let numberColumn = (Object.keys(bookmarks).indexOf(key) + 1).toString().padStart(2, " ");
 
 		/* Bookmark line */
-		process.stdout.write( tableBorder("│ ") + numberColumn + tableBorder(" │ ") );
-		process.stdout.write( commandName + tableBorder(" │ ") + command + tableBorder(" │\n") );
+		if (current == "" || matches[key] == 1 || matches[key] == 2) {
+			process.stdout.write( tableBorder("│ ") + numberColumn + tableBorder(" │ ") );
+			process.stdout.write( commandName + tableBorder(" │ ") + command + tableBorder(" │\n") );
 
-		/* Divider, but omit if last bookmark in list */
-		if (key != Object.keys(bookmarks).at(-1)) {
-			process.stdout.write( tableBorder("│╌╌╌╌│" + "╌".repeat(nameColumnWidth + 2)) );
-			process.stdout.write( tableBorder("┼" + "╌".repeat(commandWidth + 2) + "│\n") );
-		}	
+			/* Divider, but omit if this key is last in the list of matching names */
+			if (key != lastMatch && lastName != key) {
+				process.stdout.write( tableBorder("│╌╌╌╌┼" + "╌".repeat(nameColumnWidth + 2)) );
+				process.stdout.write( tableBorder("┼" + "╌".repeat(commandWidth + 2) + "│\n") );
+			}
+		}
 	}
-
+		
 	/* Draw bottom border of table */
 	process.stdout.write( tableBorder("╰────┴" + "─".repeat(nameColumnWidth + 2)) );
 	process.stdout.write( tableBorder("┴" + "─".repeat(commandWidth + 2) + "╯\n") );
