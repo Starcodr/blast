@@ -1,10 +1,10 @@
 {
-  "name": "blast",
-  "version": "1.0.0",
+  "name": "blarst",
+  "version": "1.0.1",
   "description": "Bookmark your latest executed terminal command.",
   "main": "bin/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "postinstall": "./install.sh"
   },
   "author": "Lars Boris",
   "license": "ISC",
@@ -12,6 +12,18 @@
     "blastit": "./bin/index.js",
     "blast": "./bin/blast"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Starcodr/blast.git"
+  },
+  "keywords": [
+    "bookmark",
+    "shell",
+    "terminal",
+    "linux",
+    "history",
+    "command line"
+  ],
   "dependencies": {
     "boxen": "4.0",
     "chalk": "2.4",

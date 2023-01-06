@@ -3,11 +3,14 @@ Linux cli command for bookmarking latest command in history with accompanying GU
 
 ## Installation
 ```
-$ ./install.sh
-
-add /home/"user"/bin to $PATH
+Install the code from NPM repository:
+$ npm install blarst
 ```
-The install script will automatically create necessary folders and files and call NPM install.
+```
+Register/install globally to run as executable command from anywhere:
+$ sudo npm install -g blarst
+```
+
 #
 ## Usage
 ### Bookmark latest history entry
@@ -48,7 +51,9 @@ $ █
 ```
 
 Run "blast" command without parameters to open GUI.  
+
 The GUI shows a list of all bookmarked commands. Writing the name of the command and pressing enter executes the command.  
+
 Tab completion on bookmark names is supported. Tab completion will also filter the list to show only the matching bookmarks.
 #
 ## TODO

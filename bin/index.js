@@ -63,29 +63,62 @@ try {
 	bookmarks = JSON.parse(rawdata);
 } catch(error) {
 	bookmarks = "{}";
-	console.log("error: " + error);
-}
-
-/* Exit with error if bookmarks file not found */
-if (!fs.existsSync(bookmarksFile)) {
-	console.log("Error: bookmarks file does not exists");
-	return;
+	fs.writeFile(bookmarksFile, '{}', function (err) {});
 }
 
 options.name = options.name.trim();
 
-if (options.action == "save") {
-	/* 
-	* Bookmark command specified at cli
-	*/
+/**
+ * Handle possible command line actions
+ */
+switch (options.action) {
+	/* Bookmark the command specified at cli */
+	case "save":
+		saveBookmark();
+		break;
 
+	/* Delete bookmark specified at cli	*/
+	case "delete":
+		deleteBookmark();
+		break;
+
+	/* Show bookmarks matching string specified at cli */
+	case "show":
+		showMatchingBookmarks();
+		break;
+
+	/* Run the command of the bookmark specified at cli	*/
+	case "use":
+		useBookmark();
+		break;
+
+	/* Show GUI	*/
+	case "showall":
+		process.stdout.write(enterAltScreenCommand); // Enter fullscreen
+		findMatches();
+		redrawGUI();
+		handleKeyboardEvents();
+		process.stdin.resume();
+
+		break;
+
+	default:
+		console.log("Error: " + options.status); // TODO: better error handling
+		process.exit(1);
+		break;
+}
+
+/**
+ * Save bookmark
+ */
+function saveBookmark() {
 	/* Avoid recursion */
 	if (options.history.startsWith("blast")) {
 		console.log("\n    " + chalk.red("Blasting blast is not sane...aborting!") + "\n");
 		return;
 	}
 
-	let saveBookmark = function() {
+	let _saveBookmark = function() {
 		console.log("Bookmarking previous history entry as " + chalk.yellow.bold(options.name) + ":");
 		console.log(chalk.bold.green(options.history));
 
@@ -107,18 +140,19 @@ if (options.action == "save") {
 				console.log("Aborted");
 				process.exit(1);
 			} else {
-				saveBookmark();
+				_saveBookmark();
 				exit();
 			}
 		});
 	} else {
-		saveBookmark();
+		_saveBookmark();
 	}
-} else if (options.action == "delete") {
-	/*
-	* Delete bookmark specified at cli
-	*/
+}
 
+/**
+ * Delete bookmark
+ */
+function deleteBookmark() {
 	if (options.name in bookmarks) {
 		delete bookmarks[options.name];
 
@@ -129,11 +163,12 @@ if (options.action == "save") {
 	} else {
 		console.log(chalk.red("Bookmark does not exist: ") + chalk.yellow.bold(options.name));
 	}
-} else if (options.action == "show") {
-	/*
-	* Show bookmarks matching string specified at cli
-	*/
-	
+}
+
+/**
+ * Displays all bookmarks with name matching the string given on command line.
+ */
+function showMatchingBookmarks() {
 	let found = 0;
 
 	for (let key of Object.keys(bookmarks)) {
@@ -154,11 +189,12 @@ if (options.action == "save") {
 	}
 
 	process.stdout.write("\n");
-} else if (options.action == "use") {
-	/*
-	* Run command specified at cli
-	*/
+}
 
+/**
+ * Run the choosen command
+ */
+function useBookmark() {
 	if (options.name in bookmarks) {
 		const command = chalk.green.bold(bookmarks[options.name]);
 		console.log("\n" + command);
@@ -180,28 +216,7 @@ if (options.action == "save") {
 	} else {
 		console.log("\n    " + chalk.red("No bookmark found matching: ") + chalk.yellow.bold(options.name) + "\n");
 	}
-} else if (options.action = "showall") {
-	/*
-	 * Show GUI
-	 */
-
-	/* Enter fullscreen */
-	process.stdout.write(enterAltScreenCommand);
-
-	if (!fs.existsSync(bookmarksFile)) {
-		fs.writeFileSync(commandFile, "");
-		console.log("Bookmarks file does not exist"); // TODO: create file if not found
-	} else {
-		/* Draw GUI initially */
-		findMatches();
-		redrawGUI();
-		handleKeyboardEvents();
-		process.stdin.resume();
-	}
-} else {
-	console.log("Error: " + options.status); // TODO: better error handling
 }
-
 
 /**
  * Handle user GUI interaction
