@@ -420,23 +420,31 @@ function redrawGUI() {
 	/* Draw line for each bookmark in table */
 	for (let key of Object.keys(matches)) {
 		let commandName = key.padEnd(nameColumnWidth, " ");
-		let command = bookmarks[key].padEnd(commandWidth, " ");
+
+		// let lc = 0;
+		// let chunks = [];
+		// let c = 0;
+		// for (; lc < bookmarks[key].length; c++) {
+		// 	chunks[c] = bookmarks[key].slice(lc, lc += commandWidth);
+		// }
+
+		/* "Chunk"ate command so it does'nt exceed command column width but wraps instead */
+		/* If no space for command column, just show nothing */
+		let chunks = new Array("");
+		if (commandWidth > 0) chunks = chunkSubstring(bookmarks[key], commandWidth);
 
 		switch (matches[key]) {
 			case 0:
 				commandName = noMatch(commandName);
-				command = noMatch(command);
-					break;
+				break;
 
 			case 1:
 				commandName = match(commandName);
-				command = match(command);
 				break;
 
 			case 2:
 				exactMatch = key;
 				commandName = matchUnique(commandName);
-				command = matchUnique(command);
 				break;
 		}
 
@@ -445,7 +453,14 @@ function redrawGUI() {
 		/* Bookmark line */
 		if (current == "" || matches[key] == 1 || matches[key] == 2) {
 			process.stdout.write( tableBorder("│ ") + numberColumn + tableBorder(" │ ") );
-			process.stdout.write( commandName + tableBorder(" │ ") + command + tableBorder(" │\n") );
+			process.stdout.write( commandName + tableBorder(" │ ") + chunks[0].padEnd(commandWidth, " ") + tableBorder(" │\n") );
+
+			if (chunks.length > 1) {
+				chunks.forEach(function(value, index, array) {
+					process.stdout.write( tableBorder("│    │ ") );
+					process.stdout.write( " ".repeat(nameColumnWidth) + tableBorder(" │ ") + value.padEnd(commandWidth, " ") + tableBorder(" │\n") );
+				});
+			}
 
 			/* Divider, but omit if this key is last in the list of matching names */
 			if (key != lastMatch && lastName != key) {
@@ -489,8 +504,18 @@ function terminalWidth() {
 	return process.stdout.getWindowSize()[0];
 }
 
+function chunkSubstring(string, size) {
+	const numChunks = Math.ceil(string.length / size)
+	const chunks = new Array(numChunks)
 
-// /* Arrow keys */
+	for (let i = 0, o = 0; i < numChunks; ++i, o += size) {
+		chunks[i] = string.substr(o, size)
+	}
+
+	return chunks
+}
+
+  // /* Arrow keys */
 // case 28:
 // 	break;
 // case 0x4B:
