@@ -57,6 +57,5 @@ The GUI shows a list of all bookmarked commands. Writing the name of the command
 Tab completion on bookmark names is supported. Tab completion will also filter the list to show only the matching bookmarks.
 #
 ## TODO
-- Delete function
 - Comment for bookmark
 - Handle situation when bookmark list is longer than terminal window height
