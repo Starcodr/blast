@@ -23,6 +23,9 @@ const GUI_MODE_DELETE = 2;
 const GUI_MODE_CONFIRM_DELETE = 3;
 var guiMode = 1;
 var fitToWidth = false;
+var currentPage = 1;
+let numberOfPages = 1;
+let numberOfVisibleRows = 0;
 
 const LIST_MINIMUM_NAME_WIDTH = 25;
 const LIST_MAXIMUM_COMMAND_WIDTH = 90;
@@ -71,6 +74,10 @@ try {
 }
 
 options.name = options.name.trim();
+
+for (let i = 1; i < 200; i++) {
+	bookmarks["test" + i] = "en test command";
+}
 
 /**
  * Handle possible command line actions
@@ -232,13 +239,34 @@ function handleKeyboardEvents() {
 	var listener = process.stdin.on('data', this.eventListener = (buf) => {
 		const charAsAscii = buf.toString().charCodeAt(0);
 
-		// fs.appendFileSync("/home/x/debug.log", "char code = " + charAsAscii + "\n");
+		// fs.appendFileSync("/home/lars/debug.log", "char code = " + charAsAscii + "\n");
+
+		if (buf == '\u001B\u005B\u0041') { // up
+			if (currentPage > 1) currentPage--;
+			// fs.appendFileSync("/home/lars/debug.log", "up pressed, num matches = " + numberOfVisibleRows + " - new current page = " + currentPage + "\n");
+			redrawGUI();
+			return;
+		}
+		if (buf == '\u001B\u005B\u0043') {
+			return;
+			// process.stdout.write('right'); 
+		}
+		if (buf == '\u001B\u005B\u0042') {
+			if (currentPage < numberOfPages) currentPage++;
+			// fs.appendFileSync("/home/lars/debug.log", "down pressed, num matches = " + numberOfVisibleRows + " - new current page = " + currentPage + "\n");
+			redrawGUI();
+			return;
+		}
+		if (buf == '\u001B\u005B\u0044') {
+			return;
+			// process.stdout.write('left'); 
+		}
 
 		/* Avoid exiting when arrow keys pressed */
-		if (buf.toString().length == 3) {
-			let x = buf.toString().charCodeAt(2);
-			if ([65, 66, 67, 68].includes(x)) return;
-		}
+		// if (buf.toString().length == 3) {
+		// 	let x = buf.toString().charCodeAt(2);
+		// 	if ([65, 66, 67, 68].includes(x)) return;
+		// }
 
 		switch (charAsAscii) {
 			case 38:
@@ -348,14 +376,6 @@ function handleKeyboardEvents() {
 								delete bookmarks[Object.keys(bookmarks)[selectedForDeletion - 1]];
 								delete matches[Object.keys(matches)[selectedForDeletion - 1]];
 	
-								for (let key of Object.keys(bookmarks)) {
-									fs.appendFileSync("/home/lars/debug.log", "bookmarks after delete = " + bookmarks[key] + "\n");
-								}
-								for (let key of Object.keys(matches)) {
-									fs.appendFileSync("/home/lars/debug.log", "matches after delete = " + matches[key] + "\n");
-								}
-			
-	
 								let data = JSON.stringify(bookmarks, null, 4);
 								fs.writeFileSync(bookmarksFile, data);
 							}
@@ -429,13 +449,21 @@ function autoComplete() {
  * Update datastructure with match states
  */
 function findMatches() {
+	numberOfVisibleRows = (current == "") ? Object.keys(bookmarks).length : 0;
+
 	for (let key of Object.keys(bookmarks)) {
 		if ( current != "" && key.toLowerCase().startsWith(current.toLowerCase()) ) {
 			key.toLowerCase() == current.toLowerCase() ? matches[key] = 2 : matches[key] = 1;
+			numberOfVisibleRows++;
 		} else {
 			matches[key] = 0;
 		}
 	}
+
+	let maxTableRows = (terminalHeight() - 19) / 2 - 1;
+	if (maxTableRows % 2 == 0) maxTableRows--;
+	numberOfPages = Math.ceil(numberOfVisibleRows / maxTableRows);
+	currentPage = 1;
 }
 
 /**
@@ -499,24 +527,57 @@ function redrawGUI() {
 	process.stdout.write( tableBorder("╭────┬" + "─".repeat(nameColumnWidth + 2)) );
 	process.stdout.write( tableBorder("┬" + "─".repeat(commandWidth + 2) + "╮\n") );
 
+	let y = {};
+
 	/* Find last matching name, for use later, to avoid to include divider after the final table row */
 	let lastMatch = "";
 	Object.keys(matches).forEach(function(value, index, array) {
-		if (matches[value] == 1 || matches[value] == 2) lastMatch = value;
+		if (matches[value] == 1 || matches[value] == 2) {
+			lastMatch = value;
+		}
+		if (matches[value] == 1 || matches[value] == 2 || current == "") {
+			y[value] = matches[value];
+		}
 	});
 
-	let lastName = Object.keys(matches).pop();
+
+	let maxTableRows = (terminalHeight() - 19) / 2 - 1;
+	if (maxTableRows % 2 == 0) maxTableRows--;
+
+	let from = (currentPage - 1) * maxTableRows + 1;
+	let to = from + maxTableRows - 1;
+	if (to > Object.keys(y).length) to = Object.keys(y).length;
+
+	fs.appendFileSync("/home/lars/debug.log", "from = " + from + " / to = " + to + " / maxTableRows = " + maxTableRows + " / currentPage = " + currentPage + "\n");
+
+	let z = {};
+
+	Object.keys(y).forEach(function(value, index, array) {
+		fs.appendFileSync("/home/lars/debug.log", "each y value when MAYBE included = " + value + " / index = " + index + "\n");
+		if ( index+1 >= from && index+1 <= to) {
+			// fs.appendFileSync("/home/lars/debug.log", "each y value when included = " + value + "\n");
+			z[value] = matches[ Object.keys(y)[index] ];
+		}
+	});
+
+	// Object.keys(z).forEach(function(value, index, array) {
+	// 	fs.appendFileSync("/home/lars/debug.log", "key = " + value + " / state = " + bookmarks[value] + "\n");
+	// });
+
+	let lastName = Object.keys(z).pop();
 
 	/* Draw line for each bookmark in table */
-	for (let key of Object.keys(matches)) {
+	for (let key of Object.keys(z)) {
 		let commandName = key.padEnd(nameColumnWidth, " ");
+
+		fs.appendFileSync("/home/lars/debug.log", "key = " + key + " / state = " + z[key] + "\n");
 
 		/* "Chunk"ate command so it does'nt exceed command column width but wraps instead */
 		/* If no space for command column, just show nothing */
 		let chunks = new Array("");
 		if (commandWidth > 0) chunks = chunkSubstring(bookmarks[key], commandWidth);
 
-		switch (matches[key]) {
+		switch (z[key]) {
 			case 0:
 				commandName = noMatch(commandName);
 				break;
@@ -534,7 +595,7 @@ function redrawGUI() {
 		let numberColumn = (Object.keys(bookmarks).indexOf(key) + 1).toString().padStart(2, " ");
 
 		/* Bookmark line */
-		if (current == "" || matches[key] == 1 || matches[key] == 2) {
+		if (current == "" || z[key] == 1 || z[key] == 2) {
 			process.stdout.write( tableBorder("│ ") + numberColumn + tableBorder(" │ ") );
 			process.stdout.write( commandName + tableBorder(" │ ") + chunks[0].padEnd(commandWidth, " ") + tableBorder(" │\n") );
 
@@ -566,8 +627,7 @@ function redrawGUI() {
 		switch (guiMode) {
 			case GUI_MODE_RUN:
 				console.log(chalk.yellow("\nSpecify name of command to execute:"));
-				// process.stdout.write(chalk.reset(": " + current));
-				process.stdout.write(": " + current);
+				process.stdout.write(chalk.reset(": " + current));
 				break;
 
 			case GUI_MODE_DELETE:
@@ -586,7 +646,14 @@ function redrawGUI() {
 }
 
 process.on('SIGWINCH', () => {
-		redrawGUI();
+	let maxTableRows = (terminalHeight() - 19) / 2 - 1;
+	if (maxTableRows % 2 == 1) maxTableRows--;
+	numberOfPages = Math.ceil(numberOfVisibleRows / maxTableRows);
+	currentPage = 1;
+
+	// fs.appendFileSync("/home/lars/debug.log", "console resized || num matches = " + numberOfVisibleRows + " / maxTableRows = " + maxTableRows + " / numberOfPages = " + numberOfPages + "\n");
+
+	redrawGUI();
 });
 
 function is_numeric(string) {
@@ -595,6 +662,10 @@ function is_numeric(string) {
 
 function terminalWidth() {
 	return process.stdout.getWindowSize()[0];
+}
+
+function terminalHeight() {
+	return process.stdout.getWindowSize()[1];
 }
 
 function chunkSubstring(string, size) {
@@ -608,12 +679,11 @@ function chunkSubstring(string, size) {
 	return chunks
 }
 
-  // /* Arrow keys */
-// case 28:
-// 	break;
-// case 0x4B:
-// 	break;
-// case 0x4D:
-// 	break;
-// case 0x48:
-// 	break;
+
+	
+// for (let key of Object.keys(bookmarks)) {
+// 	fs.appendFileSync("/home/lars/debug.log", "bookmarks after delete = " + bookmarks[key] + "\n");
+// }
+// for (let key of Object.keys(matches)) {
+// 	fs.appendFileSync("/home/lars/debug.log", "matches after delete = " + matches[key] + "\n");
+// }
