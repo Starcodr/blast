@@ -58,4 +58,4 @@ Tab completion on bookmark names is supported. Tab completion will also filter t
 #
 ## TODO
 - Comment for bookmark
-- Handle situation when bookmark list is longer than terminal window height
+- Linewrapping of commands in list

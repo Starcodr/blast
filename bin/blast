@@ -13,11 +13,11 @@ case $# in
     ;;
 
   2)
-	if [ $1 == "as" ]; then
+	if [ "${1,,}" == "as" ]; then
 		blastit -a "save" -n $2 -h "$(cat $HOME/.config/blast/latest_history.txt)"
-	elif [ $1 == "show" ]; then
+	elif [ "${1,,}" == "show" ]; then
 		blastit -a "show" -n $2 -h "$(cat $HOME/.config/blast/latest_history.txt)"
-	elif [ $1 == "delete" ]; then
+	elif [ "${1,,}" == "delete" ]; then
 		blastit -a "delete" -n $2 -h "$(cat $HOME/.config/blast/latest_history.txt)"
 	else
 		blastit -a "error" -n "illegal syntax" -h ""
