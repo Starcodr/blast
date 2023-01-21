@@ -10,6 +10,7 @@ $ npm install blarst
 Register/install globally to run as executable command from anywhere:
 $ sudo npm install -g blarst
 ```
+To enable autocompletion on commandline add "source ~/.config/blast/completion.sh" to your bashrc file.
 
 #
 ## Usage
