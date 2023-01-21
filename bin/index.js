@@ -11,9 +11,13 @@ const readline = require('readline');
 const { check, updateLocale } = require("yargs");
 const { exit } = require("process");
 const clear = require('clear');
-// import process from 'node:process';
+const ansi = require('ansi');
+
+let cursor = ansi(process.stdout);
+var eventEmitter = null;
 
 var bookmarks = new Array();
+var settings = new Array();
 var current = "";
 var matches = {};
 var selectedForDeletion = -1;
@@ -21,12 +25,13 @@ var selectedForDeletion = -1;
 const GUI_MODE_RUN = 1;
 const GUI_MODE_DELETE = 2;
 const GUI_MODE_CONFIRM_DELETE = 3;
+const GUI_MODE_SETTINGS = 4;
 
 var guiMode = 1;
 var fitToWidth = false;
 var currentPage = 1;
-let numberOfPages = 1;
-let numberOfVisibleRows = 0;
+var numberOfPages = 1;
+var numberOfVisibleRows = 0;
 
 const LIST_MINIMUM_NAME_WIDTH = 25;
 const LIST_MAXIMUM_COMMAND_WIDTH = 90;
@@ -39,9 +44,9 @@ const enterAltScreenCommand = '\x1b[?1049h';
 const leaveAltScreenCommand = '\x1b[?1049l';
 
 /* Path to file containing bookmarks etc. */
-const configDirectory = os.homedir() + "/.config/blast";
 const bookmarksFile = os.homedir() + "/.config/blast/bookmarks.json";
 const commandFile = os.homedir() + "/.config/blast/command.sh";
+const completionFile = os.homedir() + "/.config/blast/completion.sh";
 
 /* Possible cli input parameters */
 const options = yargs
@@ -51,13 +56,18 @@ const options = yargs
  .option("a", { alias: "action", describe: "status: error or success", type: "string", demandOption: false })
  .argv;
 
-/* Create required files if they do not exists already */
+/* Create required files if they do not exist */
 if (!fs.existsSync(bookmarksFile)) {
-	fs.writeFile(bookmarksFile, '{}', function (err) {});
+	let json = JSON.stringify(defaultBookmarksData(), null, 4);
+	fs.writeFile(bookmarksFile, json, function (err) {});
 }
 
 if (!fs.existsSync(commandFile)) {
-	fs.writeFile(commandFile, '{}', function (err) {});
+	fs.writeFile(commandFile, "", function (err) {});
+}
+
+if (!fs.existsSync(completionFile)) {
+	fs.writeFile(completionFile, "", function (err) {});
 }
 
 /* Make sure no command is run unintentionally */
@@ -65,13 +75,25 @@ fs.writeFileSync(commandFile, "");
 
 /* Fetch existing bookmarks */
 let rawdata = fs.readFileSync(bookmarksFile);
-if (rawdata.toString().trim() == "") rawdata = "{}";
 
 try {
-	bookmarks = JSON.parse(rawdata);
+	let data = JSON.parse(rawdata);
+	bookmarks = data.bookmarks;
+	settings = data.settings;
+	fitToWidth = settings.fitToWidth;
+
+	/* Remove empty commands if any should exist by mistake */
+	for (let key of Object.keys(bookmarks)) {
+		if (bookmarks[key].trim() == "") {
+			delete bookmarks[key];
+		}
+	}
 } catch(error) {
-	bookmarks = "{}";
-	fs.writeFile(bookmarksFile, '{}', function (err) {});
+	let data = defaultBookmarksData();
+	bookmarks = data.bookmarks;
+	settings = data.settings;
+
+	writeBookmarksFile();
 }
 
 options.name = options.name.trim();
@@ -103,10 +125,15 @@ switch (options.action) {
 
 	/* Show GUI	*/
 	case "showall":
-		process.stdout.write(enterAltScreenCommand); // Enter fullscreen
+		write(enterAltScreenCommand); // Enter fullscreen
 		findMatches();
 		redrawGUI();
-		handleKeyboardEvents();
+
+		process.stdin.currentLine = '';
+		process.stdin.setRawMode(true);
+	
+		process.stdin.on('data', buf => keyboardListener(buf));
+	
 		process.stdin.resume();
 
 		break;
@@ -133,19 +160,14 @@ function saveBookmark() {
 
 		/* Store bookmark */
 		bookmarks[options.name] = options.history;
-		const ordered = Object.fromEntries(Object.entries(bookmarks).sort(
-			(a, b) => a[0].localeCompare(b[0])
-		));
-
-		let data = JSON.stringify(ordered, null, 4);
-		fs.writeFileSync(bookmarksFile, data);
+		writeBookmarksFile();
 	}
 
 	if (options.name in bookmarks) {
 		/* Have user confirm overwrite */
 		let rl = readline.createInterface(process.stdin, process.stdout);
 		rl.question("A bookmark with this name already exists. Replace? [yes]/no: ", function (answer) {
-			if (answer == "no" || answer == "n") {
+			if (answer.toLowerCase() == "no" || answer.toLowerCase() == "n") {
 				console.log("Aborted");
 				process.exit(1);
 			} else {
@@ -164,9 +186,7 @@ function saveBookmark() {
 function deleteBookmark() {
 	if (options.name in bookmarks) {
 		delete bookmarks[options.name];
-
-		let data = JSON.stringify(bookmarks, null, 4);
-		fs.writeFileSync(bookmarksFile, data);
+		writeBookmarksFile();
 
 		console.log("Deleting bookmark: " + chalk.yellow.bold(options.name));
 	} else {
@@ -185,10 +205,10 @@ function showMatchingBookmarks() {
 			found++;
 
 			if (found == 1) {
-				process.stdout.write("\n");
+				write("\n");
 			}
 
-			process.stdout.write("    Bookmark " + chalk.yellow.bold(key + ": "));
+			write("    Bookmark " + chalk.yellow.bold(key + ": "));
 			console.log(chalk.italic(bookmarks[key]));
 		}
 	}
@@ -197,7 +217,7 @@ function showMatchingBookmarks() {
 		console.log("\n    " + chalk.red("No bookmarks found matching: ") + chalk.yellow.bold(options.name));
 	}
 
-	process.stdout.write("\n");
+	write("\n");
 }
 
 /**
@@ -209,19 +229,26 @@ function useBookmark() {
 		console.log("\n" + command);
 
 		/* Have user confirm */
-		let rl = readline.createInterface(process.stdin, process.stdout);
-		rl.question("Execute this command? [yes]/no: ", function (answer) {
-			if (answer.toLowerCase() == "no" || answer.toLowerCase() == "n") {
-				console.log("Aborted");
-				process.exit(1);
-			} else {
-				console.log("Executing command...\n");
+		if (settings.confirmCommandLine) {
+			let rl = readline.createInterface(process.stdin, process.stdout);
+			rl.question("Execute this command? [yes]/no: ", function (answer) {
+				if (answer.toLowerCase() == "no" || answer.toLowerCase() == "n") {
+					console.log("Aborted");
+					process.exit(1);
+				} else {
+					console.log("Executing command...\n");
 
-				fs.writeFileSync(commandFile, bookmarks[options.name]);
-				rl.close();
-				return;
-			}
-		});
+					fs.writeFileSync(commandFile, bookmarks[options.name]);
+					rl.close();
+					return;
+				}
+			});
+		} else {
+			console.log("Executing command...\n");
+
+			fs.writeFileSync(commandFile, bookmarks[options.name]);
+			return;
+		}
 	} else {
 		console.log("\n    " + chalk.red("No bookmark found matching: ") + chalk.yellow.bold(options.name) + "\n");
 	}
@@ -230,177 +257,274 @@ function useBookmark() {
 /**
  * Handle user GUI interaction
  */
-function handleKeyboardEvents() {
-	process.stdin.currentLine = '';
-	process.stdin.setRawMode(true);
+function keyboardListener(buf) {
+	if (guiMode == GUI_MODE_SETTINGS) {
+		settingsKeyboardListener(buf);
+	} else {
+		mainKeyboardListener(buf);
+	}
+}
 
-	var listener = process.stdin.on('data', this.eventListener = (buf) => {
-		const charAsAscii = buf.toString().charCodeAt(0);
+function mainKeyboardListener(buf) {
+	const charAsAscii = buf.toString().charCodeAt(0);
 
-		// fs.appendFileSync("/home/x/debug.log", "char code = " + charAsAscii + "\n");
+	// fs.appendFileSync("/home/x/debug.log", "char code = " + charAsAscii + "\n");
 
-		if (buf == '\u001B\u005B\u0041') { // Up
-			if (currentPage > 1) currentPage--;
+	if (buf == '\u001B\u005B\u0041') { // Up
+		if (currentPage > 1) currentPage--;
+		redrawGUI();
+
+		return;
+	}
+
+	if (buf == '\u001B\u005B\u0042') { // Down
+		if (currentPage < numberOfPages) currentPage++;
+		redrawGUI();
+
+		return;
+	}
+
+	if (buf == '\u001B\u005B\u0044') { // Left
+		return;
+	}
+
+	if (buf == '\u001B\u005B\u0043') { // Right
+		return;
+	}
+
+	switch (charAsAscii) {
+		case 38:
+			clear();
+			break;
+
+		/* Ctrl-c */
+		case 0x03:
+			console.log('Exiting..');
+
+			cursor.show();
+			write(leaveAltScreenCommand);
+			process.kill(process.pid, 'SIGINT');
+			break;
+
+		/* Ctrl-d */
+		case 0x04:
+			if (guiMode == GUI_MODE_DELETE) {
+				guiMode = GUI_MODE_RUN;
+				current = "";
+				redrawGUI();
+			} else {
+				guiMode = GUI_MODE_DELETE;
+				current = "";
+				for (let key of Object.keys(bookmarks)) {
+					matches[key] = 1;
+				}
+				redrawGUI();
+			}
+
+			break;
+
+		/* Ctrl-f */
+		case 0x06:
+			fitToWidth = !fitToWidth;
 			redrawGUI();
 
-			return;
-		}
+			break;
 
-		if (buf == '\u001B\u005B\u0042') { // Down
-			if (currentPage < numberOfPages) currentPage++;
+		/* Ctrl-s */
+		case 0x13:
+			guiMode = GUI_MODE_SETTINGS;
+			cursor.hide();
 			redrawGUI();
 
-			return;
-		}
+			break;
 
-		if (buf == '\u001B\u005B\u0044') { // Left
-			return;
-		}
-
-		if (buf == '\u001B\u005B\u0043') { // Right
-			return;
-		}
-
-		switch (charAsAscii) {
-			case 38:
-				clear();
+		/* Esc */
+		case 27:
+			if (guiMode != GUI_MODE_RUN) {
+				current = "";
+				guiMode = GUI_MODE_RUN;
+				redrawGUI();
 				break;
+			}
 
-			/* Ctrl-c */
-			case 0x03:
-				console.log('Exiting..');
+			console.log('Exiting..');
 
-				process.stdout.write(leaveAltScreenCommand);
-				process.kill(process.pid, 'SIGINT');
-				break;
+			cursor.show();
+			write(leaveAltScreenCommand);
+			process.kill(process.pid, 'SIGINT');
 
-			/* Ctrl-d */
-			case 0x04:
-				if (guiMode == GUI_MODE_DELETE) {
-					guiMode = GUI_MODE_RUN;
-					current = "";
-					redrawGUI();
-				} else {
+			break;
+		
+		/* Backspace */
+		case 127:
+			current = current.slice(0, -1);
+
+			if (guiMode == GUI_MODE_RUN) {
+				findMatches();
+			}
+			redrawGUI();
+
+			break;
+
+		/* Tab */
+		case 0x09:
+			autoComplete();
+			findMatches();
+			redrawGUI();
+
+			break;
+
+		/* Enter */
+		case 13:
+			switch (guiMode) {
+				case GUI_MODE_RUN:
+					let exactMatchIndex = Object.values(matches).indexOf(2);
+					if (exactMatchIndex > -1) {
+						let commandName = Object.keys(matches)[exactMatchIndex];
+
+						write(leaveAltScreenCommand);
+						fs.writeFileSync(commandFile, bookmarks[commandName]);
+						console.log("\nExecuting command " + chalk.yellow.bold(commandName) + ": " + chalk.italic(bookmarks[commandName]) + "\n");
+
+						exit();
+					}
+					break;
+	
+				case GUI_MODE_DELETE:
+					selectedForDeletion = parseInt(current) == NaN ? -1 : parseInt(current);
+
+					if (selectedForDeletion > 0 && selectedForDeletion <= Object.keys(bookmarks).length) {
+						current = "";
+						guiMode = GUI_MODE_CONFIRM_DELETE;
+						redrawGUI();
+					}
+					break;
+	
+				case GUI_MODE_CONFIRM_DELETE:
+					if (current.toLowerCase() != "no" && current.toLowerCase() != "n") {
+						if (selectedForDeletion != -1) {
+							delete bookmarks[Object.keys(bookmarks)[selectedForDeletion - 1]];
+							delete matches[Object.keys(matches)[selectedForDeletion - 1]];
+
+							writeBookmarksFile();
+						}
+					}
+
 					guiMode = GUI_MODE_DELETE;
 					current = "";
-					for (let key of Object.keys(bookmarks)) {
-						matches[key] = 1;
-					}
+					selectedForDeletion = -1;
 					redrawGUI();
-				}
 
-				break;
-
-			/* Ctrl-f */
-			case 0x06:
-				fitToWidth = !fitToWidth;
-				redrawGUI();
-
-				break;
-
-			/* Esc */
-			case 27:
-				if (guiMode != GUI_MODE_RUN) {
-					current = "";
-					guiMode = GUI_MODE_RUN;
-					redrawGUI();
 					break;
-				}
+			}
 
-				console.log('Exiting..');
-
-				process.stdout.write(leaveAltScreenCommand);
-				process.kill(process.pid, 'SIGINT');
-
-				break;
-			
-			/* Backspace */
-			case 127:
-				current = current.slice(0, -1);
-
-				if (guiMode == GUI_MODE_RUN) {
-					findMatches();
-				}
-				redrawGUI();
-
-				break;
-
-			/* Tab */
-			case 0x09:
-				autoComplete();
-				findMatches();
-				redrawGUI();
-
-				break;
-
-			/* Enter */
-			case 13:
-				switch (guiMode) {
-					case GUI_MODE_RUN:
-						let exactMatchIndex = Object.values(matches).indexOf(2);
-						if (exactMatchIndex > -1) {
-							let commandName = Object.keys(matches)[exactMatchIndex];
-	
-							process.stdout.write(leaveAltScreenCommand);
-							fs.writeFileSync(commandFile, bookmarks[commandName]);
-							console.log("\nExecuting command " + chalk.yellow.bold(commandName) + ": " + chalk.italic(bookmarks[commandName]) + "\n");
-	
-							exit();
-						}
-						break;
-		
-					case GUI_MODE_DELETE:
-						selectedForDeletion = parseInt(current) == NaN ? -1 : parseInt(current);
-
-						if (selectedForDeletion > 0 && selectedForDeletion <= Object.keys(bookmarks).length) {
-							current = "";
-							guiMode = GUI_MODE_CONFIRM_DELETE;
-							redrawGUI();
-						}
-						break;
-		
-					case GUI_MODE_CONFIRM_DELETE:
-						if (current.toLowerCase() != "no" && current.toLowerCase() != "n") {
-							if (selectedForDeletion != -1) {
-								delete bookmarks[Object.keys(bookmarks)[selectedForDeletion - 1]];
-								delete matches[Object.keys(matches)[selectedForDeletion - 1]];
-	
-								let data = JSON.stringify(bookmarks, null, 4);
-								fs.writeFileSync(bookmarksFile, data);
-							}
-						}
-	
-						guiMode = GUI_MODE_DELETE;
-						current = "";
-						selectedForDeletion = -1;
-						redrawGUI();
-
-						break;
-
-					default:
-						break;
-				}
-
-				break;
-						
-			/* User input */
-			default:
-				if (guiMode == GUI_MODE_DELETE) {
+			break;
+					
+		/* User input */
+		default:
+			switch (guiMode) {
+				case GUI_MODE_DELETE:
 					if (is_numeric(String.fromCharCode(charAsAscii))) {
 						current += String.fromCharCode(charAsAscii);
 					}
-				} else if (guiMode == GUI_MODE_CONFIRM_DELETE) {
+					break;
+
+				case GUI_MODE_CONFIRM_DELETE:
 					current += String.fromCharCode(charAsAscii);
-				} else if (guiMode == GUI_MODE_RUN) {
+					break;
+
+				case GUI_MODE_RUN:
 					current += String.fromCharCode(charAsAscii);
 					findMatches();
-				}
+					break;
+			}
 
+			redrawGUI();
+			break;
+	}
+}
+
+function settingsKeyboardListener(buf) {
+	const charAsAscii = buf.toString().charCodeAt(0);
+
+	switch (charAsAscii) {
+		case 38:
+			clear();
+			break;
+
+		/* 1 (toggle usage info) */
+		case 49:
+			settings.showUsageInfo = !settings.showUsageInfo;
+			writeBookmarksFile();
+			redrawGUI();
+			break;
+
+		/* 2 (toggle large logo) */
+		case 50:
+			settings.showLargeLogo = !settings.showLargeLogo;
+			writeBookmarksFile();
+			redrawGUI();
+			break;
+
+		/* 3 (toggle confirm on command line) */
+		case 51:
+			settings.confirmCommandLine = !settings.confirmCommandLine;
+			writeBookmarksFile();
+			redrawGUI();
+			break;
+
+		/* 4 (toggle fit to width) */
+		case 52:
+			settings.fitToWidth = !settings.fitToWidth;
+			writeBookmarksFile();
+			redrawGUI();
+			break;
+
+		/* e (export bookmarks) */
+		case 101:
+			/* not implemented */
+			break;
+
+		/* Ctrl-c */
+		case 0x03:
+			console.log('Exiting..');
+
+			cursor.show();
+			write(leaveAltScreenCommand);
+			process.kill(process.pid, 'SIGINT');
+			break;
+
+		/* Esc */
+		case 27:
+			if (guiMode != GUI_MODE_RUN) {
+				guiMode = GUI_MODE_RUN;
+				cursor.show();
 				redrawGUI();
-
 				break;
-		}
-	});
+			}
+
+			console.log('Exiting..');
+
+			write(leaveAltScreenCommand);
+			process.kill(process.pid, 'SIGINT');
+			break;
+		
+		/* Backspace */
+		case 127:
+			redrawGUI();
+			break;
+					
+		/* User input */
+		default:
+			// if (guiMode == GUI_MODE_SETTINGS) {
+			// 	if (is_numeric(String.fromCharCode(charAsAscii))) {
+			// 		fs.appendFileSync("/home/lars/debug.log", "settings value = " + charAsAscii + "\n");
+			// 	}
+			// }
+
+			// redrawGUI();
+			break;
+	}
 }
 
 /**
@@ -460,6 +584,11 @@ function findMatches() {
  * Redraw GUI after user interaction
  */
 function redrawGUI() {
+	if (guiMode == GUI_MODE_SETTINGS) {
+		redrawSettingsGUI();
+		return;
+	}
+
 	exactMatch = "";
 
 	const match = chalk.white;
@@ -467,10 +596,11 @@ function redrawGUI() {
 	const noMatch = chalk.white;
 	const tableBorder = chalk.white;
 	const usage = chalk.white;
+	const menuStyle = chalk.bgAnsi256(215).black;
 
 	/* Prepare/clear screen */
 	readline.cursorTo(process.stdout, 0, 0);
-	readline.clearScreenDown(process.stdout); // process.stdout.write("\x1Bc")
+	readline.clearScreenDown(process.stdout); // write("\x1Bc")
 	readline.cursorTo(process.stdout, 0, terminalHeight());
 
 	/* Find width of name column */
@@ -485,38 +615,47 @@ function redrawGUI() {
 	let remainingWidth = terminalWidth() - LIST_NUMBER_COLUMN_WIDTH - nameColumnWidth - 7; // 7 = padding and borders
 	let commandWidth = Math.max( Math.min(remainingWidth, maximumCommandWidth), 0 );
 
-	/* Title and menu */
-	let menuWidth = (" ^F Fit width " + " ^D Delete " + "^C/Esc Exit").length;
-	let menu = chalk.bgAnsi256(215).black(" ^F ") + " Fit width " + chalk.bgAnsi256(215).black(" ^D ") + " Delete " + chalk.bgAnsi256(215).black(" ^C/Esc ") + " Exit";
+	/* Menu */
+	let menuWidth = (` ^F Fit width  ^D Delete  ^S Settings ^C/Esc Exit`).length;
+	let menu = menuStyle(" ^F ") + " Fit width "
+			 + menuStyle(" ^D ") + " Delete "
+			 + menuStyle(" ^S ") + " Settings "
+			 + menuStyle(" ^C/Esc ") + " Exit";
+
 	let tableWidth = nameColumnWidth + commandWidth + LIST_NUMBER_COLUMN_WIDTH + 2;
 
-	if (menuWidth + LABEL_TITLE_WIDTH + 4 > terminalWidth()) process.stdout.write( "\n" );
+	if (menuWidth + LABEL_TITLE_WIDTH + 4 > terminalWidth()) write( "\n" );
 	readline.cursorTo(process.stdout, tableWidth - menuWidth);
-	process.stdout.write( menu );
+	write( menu );
 
 	readline.cursorTo(process.stdout, 0);
 
-	cfonts.say('BLAST', {
-		font: "block",
-		colors: ["yellowBright", "#f80"],
-		space: false,
-	});
-
-	process.stdout.write( "\n" + chalk.yellow.bold(LABEL_TITLE) );
-	process.stdout.write( "\n\n" );
+	/* Title */
+	if (settings.showLargeLogo) {
+		cfonts.say('BLAST', {
+			font: "block",
+			colors: ["yellowBright", "#f80"],
+			space: false,
+		});
+		write( "\n" + chalk.yellow.bold(LABEL_TITLE) );
+	} else {
+		write( chalk.yellow.bold(" BLAST - " + LABEL_TITLE) );
+	}
+	write( "\n\n" );
 
 	/* Usage info */
-	console.log( "\n" + chalk.yellow.bold(" Usage:") );
-	console.log( usage(" blast as ") + chalk.blue("'bookmark-name'") + "     <- Save bookmark");
-	console.log( usage(" blast ") + chalk.blue("'bookmark-name'") + "        <- Execute bookmarked command");
-	console.log( usage(" blast delete ") + chalk.blue("'bookmark-name'") + " <- Delete bookmark" );
-	console.log( usage(" blast show ") + chalk.blue("'bookmark-name'") + "   <- List bookmarks starting with specified string\n\n");
-
-	// readline.cursorTo(process.stdout, 0, terminalHeight());
+	if (settings.showUsageInfo) {
+		console.log( chalk.yellow.bold(" Usage:") );
+		console.log( usage(" blast as ") + chalk.blue("'bookmark-name'") + "     <- Save bookmark");
+		console.log( usage(" blast ") + chalk.blue("'bookmark-name'") + "        <- Execute bookmarked command");
+		console.log( usage(" blast delete ") + chalk.blue("'bookmark-name'") + " <- Delete bookmark" );
+		console.log( usage(" blast show ") + chalk.blue("'bookmark-name'") + "   <- List bookmarks starting with specified string ($ shows all bookmarks)\n");
+		console.log( " To enable autocompletion on commandline, remember to source ~/.config/blast/completion.sh in your bashrc file.\n" );
+	}
 
 	/* Draw top border of table */
-	process.stdout.write( tableBorder("╭" + "─".repeat(5) + "┬" + "─".repeat(nameColumnWidth + 2)) );
-	process.stdout.write( tableBorder("┬" + "─".repeat(commandWidth + 2) + "╮\n") );
+	write( tableBorder("╭" + "─".repeat(5) + "┬" + "─".repeat(nameColumnWidth + 2)) );
+	write( tableBorder("┬" + "─".repeat(commandWidth + 2) + "╮\n") );
 
 	let y = {};
 
@@ -576,54 +715,98 @@ function redrawGUI() {
 
 		/* Bookmark line */
 		if (current == "" || z[key] == 1 || z[key] == 2) {
-			process.stdout.write( tableBorder("│ ") + numberColumn + tableBorder(" │ ") );
-			process.stdout.write( commandName + tableBorder(" │ ") + chunks[0].padEnd(commandWidth, " ") + tableBorder(" │\n") );
+			write( tableBorder("│ ") + numberColumn + tableBorder(" │ ") );
+			write( commandName + tableBorder(" │ ") + chunks[0].padEnd(commandWidth, " ") + tableBorder(" │\n") );
 
 			/* Linewrap feature fubar. Max allowed table rows depends on commands line-wrapped or not. Implement later. */
 			// if (chunks.length > 1) {
 			// 	chunks.slice(1).forEach(function(value, index, array) {
-			// 		process.stdout.write( tableBorder("│    │ ") );
-			// 		process.stdout.write( " ".repeat(nameColumnWidth) + tableBorder(" │ ") + value.padEnd(commandWidth, " ") + tableBorder(" │\n") );
+			// 		write( tableBorder("│    │ ") );
+			// 		write( " ".repeat(nameColumnWidth) + tableBorder(" │ ") + value.padEnd(commandWidth, " ") + tableBorder(" │\n") );
 			// 	});
 			// }
 
-			/* Divider, but omit if this key is last in the list of matching names */
+			/* Draw divider, but omit if this key is last in the list of matching names */
 			if (key != lastMatch && lastName != key) {
-				process.stdout.write( tableBorder("│" + "╌".repeat(5) + "┼" + "╌".repeat(nameColumnWidth + 2)) );
-				process.stdout.write( tableBorder("┼" + "╌".repeat(commandWidth + 2) + "│\n") );
+				write( tableBorder("│" + "╌".repeat(5) + "┼" + "╌".repeat(nameColumnWidth + 2)) );
+				write( tableBorder("┼" + "╌".repeat(commandWidth + 2) + "│\n") );
 			}
 		}
 	}
 		
 	/* Draw bottom border of table */
-	process.stdout.write( tableBorder("╰" + "─".repeat(5) + "┴" + "─".repeat(nameColumnWidth + 2)) );
-	process.stdout.write( tableBorder("┴" + "─".repeat(commandWidth + 2) + "╯\n") );
+	write( tableBorder("╰" + "─".repeat(5) + "┴" + "─".repeat(nameColumnWidth + 2)) );
+	write( tableBorder("┴" + "─".repeat(commandWidth + 2) + "╯\n") );
 
 	/* Update input line */
+	if (guiMode == GUI_MODE_SETTINGS) {
+		return;
+	}
+
 	if (exactMatch != "") {
 		let command = bookmarks[exactMatch]
 		console.log(chalk.green("\nMatch found: press enter to execute command"));
-		process.stdout.write(": " + current);
+		write(": " + current);
 	} else {
 		switch (guiMode) {
 			case GUI_MODE_RUN:
 				console.log(chalk.yellow("\nSpecify name of command to execute:"));
-				process.stdout.write(chalk.reset(": " + current));
+				write(chalk.reset(": " + current));
 				break;
 
 			case GUI_MODE_DELETE:
 				console.log(chalk.yellow("\nSpecify number of command to delete and press enter:"));
-				process.stdout.write(": " + current);
+				write(": " + current);
 				break;
 
 			case GUI_MODE_CONFIRM_DELETE:
 				let nameOfCommandToDelete = Object.keys(bookmarks)[selectedForDeletion - 1];
 				console.log(chalk.yellow("\nAbout to delete " + chalk.red(nameOfCommandToDelete) +  " are you sure?"));
 	
-				process.stdout.write("[yes]/no: " + current);
+				write("[yes]/no: " + current);
 				break;
 		}
 	}
+}
+
+function redrawSettingsGUI() {
+	const tableBorder = chalk.white;
+
+	/* Prepare/clear screen */
+	readline.cursorTo(process.stdout, 0, 0);
+	readline.clearScreenDown(process.stdout); // write("\x1Bc")
+
+	readline.cursorTo(process.stdout, 0, terminalHeight() / 2 - 8);
+
+	cfonts.say('SETTINGS', {
+		font: "block",
+		colors: ["yellowBright", "#f80"],
+		transitionGradient: true,
+		gradient: ['#ffaa00', '#cc7700'],
+		space: false,
+		align: "center"
+	});
+
+	let offset = terminalWidth() / 2 - 18;
+	let usageInfo = settings.showUsageInfo ? "✓" : " ";
+	let largeLogo = settings.showLargeLogo ? "✓" : " ";
+	let confirmCLI = settings.confirmCommandLine ? "✓" : " ";
+	let fitWidth = settings.fitToWidth ? "✓" : " ";
+
+	write( "\n\n" );
+	write( " ".repeat(offset) + tableBorder("╭─────── Press key to select ──────╮\n") );
+	write( " ".repeat(offset) + tableBorder("│                                  │\n") );
+	write( " ".repeat(offset) + tableBorder("│  1 | Show usage info        [" + usageInfo + "]  │\n") );
+	write( " ".repeat(offset) + tableBorder("│  2 | Show large logo        [" + largeLogo + "]  │\n") );
+	write( " ".repeat(offset) + tableBorder("│  3 | Confirm command line   [" + confirmCLI + "]  │\n") );
+	write( " ".repeat(offset) + tableBorder("│  4 | Fit width on startup   [" + fitWidth + "]  │\n") );
+	write( " ".repeat(offset) + tableBorder("│                                  │\n") );
+	write( " ".repeat(offset) + tableBorder("│  e | Export bookmarks            │\n") );
+	write( " ".repeat(offset) + tableBorder("│                                  │\n") );
+	write( " ".repeat(offset) + tableBorder("╰──────────────────────────────────╯\n") );
+	write( "\n" );
+
+	write( " ".repeat(terminalWidth() / 2 - 18) + "(esc) exit settings" );
 }
 
 process.on('SIGWINCH', () => {
@@ -634,6 +817,10 @@ process.on('SIGWINCH', () => {
 
 	redrawGUI();
 });
+
+function write(text) {
+	process.stdout.write(text);
+}
 
 function is_numeric(string) {
 	return /^\d+$/.test(string);
@@ -656,4 +843,38 @@ function chunkSubstring(string, size) {
 	}
 
 	return chunks
+}
+
+function defaultBookmarksData() {
+	return {
+		settings: {
+			showUsageInfo: true,
+			showLargeLogo: true,
+			confirmCommandLine: true,
+			fitToWidth: false
+		},
+		bookmarks: {}
+	};
+}
+
+function writeBookmarksFile() {
+	let json = JSON.stringify(
+		{
+			settings: settings,
+			bookmarks:
+				Object.fromEntries(Object.entries(bookmarks).sort(
+					(a, b) => a[0].localeCompare(b[0])
+				))
+		}
+		, null, 4
+	);
+
+	let names = "";
+	for (let name of Object.keys(bookmarks)) {
+		names += name + " ";
+	}
+	let completion = '#/usr/bin/env bash\ncomplete -W "' + names.trim() + '" blast';
+
+	fs.writeFileSync(completionFile, completion);
+	fs.writeFileSync(bookmarksFile, json);
 }

@@ -1,6 +1,6 @@
 {
   "name": "blarst",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Bookmark your latest executed terminal command.",
   "main": "bin/index.js",
   "scripts": {
@@ -22,12 +22,13 @@
     "terminal",
     "linux",
     "history",
-	"command",
-	"gui",
-	"management",
-    "command line"
+    "command",
+    "gui",
+    "nodejs",
+    "commandline"
   ],
   "dependencies": {
+    "ansi": "^0.3.1",
     "boxen": "4.0",
     "cfonts": "^3.1.1",
     "chalk": "2.4",
